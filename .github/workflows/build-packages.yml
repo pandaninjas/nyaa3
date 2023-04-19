@@ -5,7 +5,7 @@ on:
 
 jobs:
   build-packages:
-    runs-on: self-hosted 
+    runs-on: ubuntu-latest 
     container: 
       image: ghcr.io/kreatolinux/builder:latest
       volumes:
