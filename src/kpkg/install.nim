@@ -1,6 +1,8 @@
 import threadpool
 
-proc install_pkg(repo: string, package: string, root: string, binary = false) =
+proc install_pkg(repo: string, package: string, root: string, binary = false,
+        enforceReproducibility = false, binrepo = "mirror.kreato.dev",
+        builddir = "/tmp/kpkg/build") =
     ## Installs an package.
 
     var pkg: runFile
@@ -25,8 +27,44 @@ proc install_pkg(repo: string, package: string, root: string, binary = false) =
     copyDir(repo&"/"&package, root&"/var/cache/kpkg/installed/"&package)
 
     writeFile(root&"/var/cache/kpkg/installed/"&package&"/list_files",
-        execProcess(
-        "tar -hxvf"&tarball&" -C "&root))
+            execProcess("tar -tf"&tarball))
+
+    if not binary:
+        var downloaded = false
+
+        let file = open(tarball&".sum.bin", fmWrite)
+
+        setCurrentDir(builddir)
+
+        for line in lines root&"/var/cache/kpkg/installed/"&package&"/list_files":
+            if fileExists(line):
+                file.writeLine(sha256hexdigest(readAll(open(line)))&"  "&line)
+
+        file.close()
+
+        try:
+            waitFor download("https://"&binrepo&"/arch/"&hostCPU&"/kpkg-tarball-"&pkg.pkg&"-"&pkg.versionString&".tar.gz.sum.bin",
+                    "/tmp/kpkg-temp-"&pkg.pkg&".bin")
+            downloaded = true
+        except:
+            if enforceReproducibility:
+                err("checksum couldn't get downloaded for reproducibility check")
+            else:
+                echo "kpkg: skipping reproducibility check, checksum couldn't get downloaded"
+                echo "kpkg: run with --enforceReproducibility=true if you want to enforce this"
+
+        if downloaded:
+            let result = execCmdEx("sha256sum -c /tmp/kpkg-temp-"&pkg.pkg&".bin")
+            if result.exitCode == 0:
+                echo "kpkg: reproducibility check success"
+            elif enforceReproducibility:
+                err("reproducibility check failed")
+            else:
+                echo "kpkg: reproducibility check failed"
+                echo "kpkg: run with --enforceReproducibility=true if you want to enforce this"
+
+    copyFile(tarball&".sum.bin", root&"/var/cache/kpkg/installed/"&package&"/list_sums")
+    discard execProcess("tar -hxf"&tarball&" -C "&root)
 
 proc install_bin(packages: seq[string], binrepo: string, root: string,
         offline: bool, downloadOnly = false) =
@@ -50,14 +88,21 @@ proc install_bin(packages: seq[string], binrepo: string, root: string,
         let chksum = tarball&".sum"
 
         if fileExists("/var/cache/kpkg/archives/arch/"&hostCPU&"/"&tarball) and
-                fileExists("/var/cache/kpkg/archives/arch/"&hostCPU&"/"&chksum):
+                fileExists("/var/cache/kpkg/archives/arch/"&hostCPU&"/"&chksum) and
+                        fileExists(
+                        "/var/cache/kpkg/archives/arch/"&hostCPU&"/"&chksum&".bin"):
             echo "Tarball already exists, not gonna download again"
         elif not offline:
             echo "Downloading tarball for "&i
             try:
-                waitFor download("https://"&binrepo&"/arch/"&hostCPU&"/"&tarball, "/var/cache/kpkg/archives/arch/"&hostCPU&"/"&tarball)
-                echo "Downloading tarball checksum for "&i
-                waitFor download("https://"&binrepo&"/arch/"&hostCPU&"/"&chksum, "/var/cache/kpkg/archives/arch/"&hostCPU&"/"&chksum)
+                waitFor download("https://"&binrepo&"/arch/"&hostCPU&"/"&tarball,
+                        "/var/cache/kpkg/archives/arch/"&hostCPU&"/"&tarball)
+                echo "Downloading checksums for "&i
+                waitFor download("https://"&binrepo&"/arch/"&hostCPU&"/"&chksum,
+                        "/var/cache/kpkg/archives/arch/"&hostCPU&"/"&chksum)
+                waitFor download("https://"&binrepo&"/arch/"&hostCPU&"/"&chksum&".bin",
+                        "/var/cache/kpkg/archives/arch/"&hostCPU&"/"&chksum&".bin")
+
             except CatchableError:
                 raise
         else:
