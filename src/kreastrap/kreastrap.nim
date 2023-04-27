@@ -246,8 +246,9 @@ proc buildPackages(useCacheIfPossible = true, repo = "/etc/kpkg/repos/main") =
             of pcDir:
                 if lastPathPart(path) != ".git":
                     info_msg "Now building "&lastPathPart(path)
+                    let installWithBin = lastPathPart(path) == "go"
                     debug "Full path: "&path
-                    kreastrapInstall(lastPathPart(path), false, "/", useCacheIfPossible)
+                    kreastrapInstall(lastPathPart(path), installWithBin, "/", useCacheIfPossible)
             of pcLinkToDir:
                 warn "kpkg doesn't support symlinks properly. Issues may occur"
                 info_msg "Now building "&lastPathPart(path)
